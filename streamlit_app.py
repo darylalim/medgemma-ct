@@ -1,7 +1,11 @@
 # streamlit_app.py
 from __future__ import annotations
 
+import os
+
 import streamlit as st
+import torch
+import transformers
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,6 +32,50 @@ DEFAULT_QUERY = (
     "your reasoning and conclude with a 'Final Answer: yes' or "
     "'Final Answer: no'."
 )
+
+@st.cache_resource
+def load_model():
+    """Load MedGemma model and processor once, cached across reruns."""
+    model_id = "google/medgemma-1.5-4b-it"
+    processor = transformers.AutoProcessor.from_pretrained(
+        model_id,
+        use_fast=True,
+        token=os.environ.get("HF_TOKEN"),
+    )
+    model = transformers.AutoModelForImageTextToText.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        device_map="auto",
+        token=os.environ.get("HF_TOKEN"),
+    )
+    return model, processor
+
+
+def run_inference(model, processor, messages: list[dict]) -> str:
+    """Run MedGemma inference and return the response text."""
+    inputs = processor.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        continue_final_message=False,
+        return_tensors="pt",
+        tokenize=True,
+        return_dict=True,
+    )
+    with torch.inference_mode():
+        inputs = inputs.to(model.device)
+        generated = model.generate(**inputs, do_sample=False, max_new_tokens=2000)
+    response = processor.post_process_image_text_to_text(
+        generated, skip_special_tokens=True
+    )
+    decoded_input = processor.post_process_image_text_to_text(
+        inputs["input_ids"], skip_special_tokens=True
+    )
+    result = response[0]
+    idx = result.find(decoded_input[0])
+    if 0 <= idx <= 2:
+        result = result[idx + len(decoded_input[0]):]
+    return result
+
 
 st.set_page_config(page_title="MedGemma CT Analysis", layout="wide")
 st.title("MedGemma CT Analysis")
@@ -67,7 +115,15 @@ st.subheader(f"CT Preview ({len(windowed)} slices)")
 gif_bytes = slices_to_gif_bytes(windowed)
 st.image(gif_bytes, caption="Windowed CT slices (R=wide, G=soft tissue, B=brain)")
 
-# --- Inference placeholder ---
+# --- Inference ---
 if analyze_btn:
     st.subheader("Analysis Results")
-    st.warning("Model loading not yet implemented.")
+    messages = build_messages(windowed, instruction, query)
+
+    with st.spinner("Loading MedGemma model (first run may take a few minutes)..."):
+        model, processor = load_model()
+
+    with st.spinner("Running inference..."):
+        response = run_inference(model, processor, messages)
+
+    st.markdown(response)
