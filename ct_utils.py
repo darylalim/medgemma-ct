@@ -1,13 +1,12 @@
 # ct_utils.py
 from __future__ import annotations
 
-import io
 import base64
+import io
 
 import numpy as np
 import PIL.Image
 import pydicom
-
 
 # MedGemma 1.5 CT windowing: (min_hu, max_hu) per RGB channel
 WINDOW_CLIPS = [(-1024, 1024), (-135, 215), (0, 80)]
@@ -19,20 +18,25 @@ def window_ct_slice(ct_slice: np.ndarray) -> np.ndarray:
     Red: wide (-1024..1024), Green: soft tissue (-135..215), Blue: brain (0..80).
     Returns uint8 RGB array.
     """
-    channels = []
-    for min_hu, max_hu in WINDOW_CLIPS:
-        ch = np.clip(ct_slice.astype(np.float32), min_hu, max_hu)
-        ch = (ch - min_hu) / (max_hu - min_hu) * 255.0
-        channels.append(np.round(ch).astype(np.uint8))
-    return np.stack(channels, axis=-1)
+    f = ct_slice.astype(np.float32)
+    channels = np.stack(
+        [
+            np.round((np.clip(f, lo, hi) - lo) * (255.0 / (hi - lo)))
+            for lo, hi in WINDOW_CLIPS
+        ],
+        axis=-1,
+    )
+    return channels.astype(np.uint8)
 
 
 def sample_slices(slices: list, max_slices: int) -> list:
-    """Uniformly sample up to max_slices from an ordered list."""
+    """Uniformly sample up to max_slices from an ordered list.
+
+    Always includes the first and last elements when sampling.
+    """
     if len(slices) <= max_slices:
         return slices
-    n = len(slices)
-    indices = [int(round(i / max_slices * (n - 1))) for i in range(1, max_slices + 1)]
+    indices = np.linspace(0, len(slices) - 1, max_slices, dtype=int)
     return [slices[i] for i in indices]
 
 
@@ -63,7 +67,7 @@ def slices_to_gif_bytes(windowed_slices: list[np.ndarray]) -> bytes:
         save_all=True,
         append_images=images[1:],
         optimize=False,
-        duration=len(images) * 3,
+        duration=100,
     )
     return buf.getvalue()
 
@@ -72,7 +76,6 @@ def encode_slice_base64(data: np.ndarray, fmt: str = "jpeg") -> str:
     """Base64-encode a windowed CT slice as a data URI."""
     buf = io.BytesIO()
     PIL.Image.fromarray(data).save(buf, format=fmt)
-    buf.seek(0)
     encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
     return f"data:image/{fmt};base64,{encoded}"
 
@@ -83,9 +86,16 @@ def build_messages(
     query: str,
 ) -> list[dict]:
     """Build the chat-completion messages list for MedGemma."""
-    content = [{"type": "text", "text": instruction}]
-    for i, ct_slice in enumerate(windowed_slices, 1):
-        content.append({"type": "image", "image": encode_slice_base64(ct_slice)})
-        content.append({"type": "text", "text": f"SLICE {i}"})
-    content.append({"type": "text", "text": query})
+    content = (
+        [{"type": "text", "text": instruction}]
+        + [
+            item
+            for i, s in enumerate(windowed_slices, 1)
+            for item in (
+                {"type": "image", "image": encode_slice_base64(s)},
+                {"type": "text", "text": f"SLICE {i}"},
+            )
+        ]
+        + [{"type": "text", "text": query}]
+    )
     return [{"role": "user", "content": content}]
