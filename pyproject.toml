@@ -1,0 +1,47 @@
+[project]
+name = "medgemma-ct"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate",
+    "flash-attn; sys_platform == 'linux'",
+    "numpy",
+    "pillow",
+    "pydicom",
+    "python-dotenv",
+    "streamlit",
+    "torch",
+    "transformers",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "ty",
+]
+
+[tool.uv]
+no-build-isolation-package = ["flash-attn"]
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",  # production (CUDA)
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",  # development (tests/tools only)
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
