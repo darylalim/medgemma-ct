@@ -1,15 +1,14 @@
 # tests/test_ct_utils.py
-import base64
 import io
 import pathlib
 from contextlib import ExitStack
 
 import numpy as np
+import PIL.Image
 import pytest
 
 from ct_utils import (
     build_messages,
-    encode_slice_base64,
     parse_dicom_files,
     sample_slices,
     slices_to_gif_bytes,
@@ -206,73 +205,49 @@ class TestSlicesToGifBytes:
 
 
 # ---------------------------------------------------------------------------
-# encode_slice_base64
-# ---------------------------------------------------------------------------
-
-
-class TestEncodeSliceBase64:
-    def test_returns_data_uri(self, small_rgb):
-        result = encode_slice_base64(small_rgb)
-        assert result.startswith("data:image/jpeg;base64,")
-
-    def test_valid_base64_payload(self, small_rgb):
-        result = encode_slice_base64(small_rgb)
-        payload = result.split(",", 1)[1]
-        decoded = base64.b64decode(payload)
-        assert len(decoded) > 0
-
-    def test_png_format(self, small_rgb):
-        result = encode_slice_base64(small_rgb, fmt="png")
-        assert result.startswith("data:image/png;base64,")
-
-    def test_roundtrip_image(self, small_rgb):
-        result = encode_slice_base64(small_rgb, fmt="png")
-        payload = result.split(",", 1)[1]
-        decoded = base64.b64decode(payload)
-        import PIL.Image
-
-        img = PIL.Image.open(io.BytesIO(decoded))
-        assert img.size == (4, 4)
-
-
-# ---------------------------------------------------------------------------
 # build_messages
 # ---------------------------------------------------------------------------
 
 
 class TestBuildMessages:
     def test_structure_single_slice(self, small_rgb):
-        msgs = build_messages([small_rgb], "instruction", "query")
+        msgs, images = build_messages([small_rgb], "instruction", "query")
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
         content = msgs[0]["content"]
-        # instruction + (image + SLICE 1) + query = 4 items
+        # instruction + image + SLICE 1 + query = 4 items
         assert len(content) == 4
         assert content[0] == {"type": "text", "text": "instruction"}
-        assert content[1]["type"] == "image"
+        assert content[1] == {"type": "image"}
         assert content[2] == {"type": "text", "text": "SLICE 1"}
         assert content[3] == {"type": "text", "text": "query"}
+        assert len(images) == 1
+        assert isinstance(images[0], PIL.Image.Image)
 
     def test_structure_multiple_slices(self, small_rgb):
         slices = [small_rgb, small_rgb, small_rgb]
-        msgs = build_messages(slices, "inst", "q")
+        msgs, images = build_messages(slices, "inst", "q")
         content = msgs[0]["content"]
         # inst + 3*(image + slice_label) + query = 1 + 6 + 1 = 8
         assert len(content) == 8
         text_items = [c["text"] for c in content if c["type"] == "text"]
         assert text_items == ["inst", "SLICE 1", "SLICE 2", "SLICE 3", "q"]
+        assert len(images) == 3
+        assert all(isinstance(img, PIL.Image.Image) for img in images)
 
-    def test_image_entries_are_data_uris(self, small_rgb):
-        msgs = build_messages([small_rgb], "inst", "q")
+    def test_image_entries_are_placeholders(self, small_rgb):
+        msgs, images = build_messages([small_rgb], "inst", "q")
         content = msgs[0]["content"]
         image_items = [c for c in content if c["type"] == "image"]
         assert len(image_items) == 1
-        assert image_items[0]["image"].startswith("data:image/jpeg;base64,")
+        assert image_items[0] == {"type": "image"}
+        assert "image" not in image_items[0] or image_items[0]["type"] == "image"
 
     def test_empty_slices(self):
-        msgs = build_messages([], "inst", "q")
+        msgs, images = build_messages([], "inst", "q")
         content = msgs[0]["content"]
         # instruction + query only
         assert len(content) == 2
         assert content[0]["text"] == "inst"
         assert content[1]["text"] == "q"
+        assert images == []
