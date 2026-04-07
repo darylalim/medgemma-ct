@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import io
 import os
+import platform
+import sys
 
 import numpy as np
 import streamlit as st
-import torch
-import transformers
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,48 +55,35 @@ DEFAULT_QUERY = (
 @st.cache_resource
 def load_model():
     """Load MedGemma model and processor once, cached across reruns."""
-    if not torch.cuda.is_available():
+    if sys.platform != "darwin" or platform.machine() != "arm64":
         raise RuntimeError(
-            "CUDA is required. This app does not support MPS or CPU inference."
+            "Apple Silicon is required. This app does not support x86 or Linux."
         )
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise ValueError("HF_TOKEN is not set. Add it to your .env file.")
-    model_id = "google/medgemma-1.5-4b-it"
-    processor = transformers.AutoProcessor.from_pretrained(
-        model_id,
-        use_fast=True,
-        token=hf_token,
-    )
-    model = transformers.AutoModelForImageTextToText.from_pretrained(
-        model_id,
-        torch_dtype=torch.float16,
-        attn_implementation="flash_attention_2",
-        token=hf_token,
-    ).to("cuda")
+
+    from mlx_vlm import load
+
+    model, processor = load("mlx-community/medgemma-1.5-4b-it-bf16")
     return model, processor
 
 
-def run_inference(model, processor, messages: list[dict]) -> str:
-    """Run MedGemma inference and return the response text."""
-    inputs = processor.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        continue_final_message=False,
-        return_tensors="pt",
-        tokenize=True,
-        return_dict=True,
-    )
-    with torch.inference_mode():
-        inputs = inputs.to(model.device)
-        generated = model.generate(
-            **inputs,
-            do_sample=False,
-            max_new_tokens=2000,
-            pad_token_id=processor.tokenizer.eos_token_id,
-        )
-    new_tokens = generated[:, inputs["input_ids"].shape[1]:]
-    return processor.batch_decode(new_tokens, skip_special_tokens=True)[0]
+def run_inference_stream(model, processor, messages, images):
+    """Yield response text chunks from MedGemma via mlx-vlm streaming."""
+    from mlx_vlm import stream_generate
+    from mlx_vlm.prompt_utils import get_chat_template
+
+    prompt = get_chat_template(processor, messages, add_generation_prompt=True)
+    for chunk in stream_generate(
+        model,
+        processor,
+        prompt,
+        image=images,
+        max_tokens=2000,
+        temperature=0.0,
+    ):
+        yield chunk.text
 
 
 st.set_page_config(page_title="MedGemma CT Analysis", layout="wide")
@@ -140,12 +127,13 @@ st.image(gif_bytes, caption="Windowed CT slices (R=wide, G=soft tissue, B=brain)
 # --- Inference ---
 if analyze_btn:
     st.subheader("Analysis Results")
-    messages = build_messages(windowed, instruction, query)
+    messages, images = build_messages(windowed, instruction, query)
 
     with st.spinner("Loading MedGemma model (first run may take a few minutes)..."):
         model, processor = load_model()
 
-    with st.spinner("Running inference..."):
-        response = run_inference(model, processor, messages)
-
-    st.markdown(response)
+    output = st.empty()
+    full_response = ""
+    for token in run_inference_stream(model, processor, messages, images):
+        full_response += token
+        output.markdown(full_response)
