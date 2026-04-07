@@ -1,7 +1,6 @@
 # ct_utils.py
 from __future__ import annotations
 
-import base64
 import io
 
 import numpy as np
@@ -72,30 +71,23 @@ def slices_to_gif_bytes(windowed_slices: list[np.ndarray]) -> bytes:
     return buf.getvalue()
 
 
-def encode_slice_base64(data: np.ndarray, fmt: str = "jpeg") -> str:
-    """Base64-encode a windowed CT slice as a data URI."""
-    buf = io.BytesIO()
-    PIL.Image.fromarray(data).save(buf, format=fmt)
-    encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
-    return f"data:image/{fmt};base64,{encoded}"
-
-
 def build_messages(
     windowed_slices: list[np.ndarray],
     instruction: str,
     query: str,
-) -> list[dict]:
-    """Build the chat-completion messages list for MedGemma."""
+) -> tuple[list[dict], list[PIL.Image.Image]]:
+    """Build the chat messages and image list for mlx-vlm inference."""
+    images = [PIL.Image.fromarray(s) for s in windowed_slices]
     content = (
         [{"type": "text", "text": instruction}]
         + [
             item
-            for i, s in enumerate(windowed_slices, 1)
+            for i in range(len(windowed_slices))
             for item in (
-                {"type": "image", "image": encode_slice_base64(s)},
-                {"type": "text", "text": f"SLICE {i}"},
+                {"type": "image"},
+                {"type": "text", "text": f"SLICE {i + 1}"},
             )
         ]
         + [{"type": "text", "text": query}]
     )
-    return [{"role": "user", "content": content}]
+    return [{"role": "user", "content": content}], images
