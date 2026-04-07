@@ -5,6 +5,7 @@ import io
 import os
 import platform
 import sys
+from collections.abc import Iterator
 
 import numpy as np
 import streamlit as st
@@ -62,6 +63,7 @@ def load_model():
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise ValueError("HF_TOKEN is not set. Add it to your .env file.")
+    # huggingface_hub reads HF_TOKEN from os.environ automatically.
 
     from mlx_vlm import load
 
@@ -69,7 +71,9 @@ def load_model():
     return model, processor
 
 
-def run_inference_stream(model, processor, messages, images):
+def run_inference_stream(
+    model, processor, messages: list[dict], images: list
+) -> Iterator[str]:
     """Yield response text chunks from MedGemma via mlx-vlm streaming."""
     from mlx_vlm import stream_generate
     from mlx_vlm.prompt_utils import get_chat_template
