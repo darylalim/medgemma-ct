@@ -8,6 +8,7 @@ import sys
 from collections.abc import Iterator
 
 import numpy as np
+import PIL.Image
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -60,8 +61,7 @@ def load_model():
         raise RuntimeError(
             "Apple Silicon is required. This app does not support x86 or Linux."
         )
-    hf_token = os.environ.get("HF_TOKEN")
-    if not hf_token:
+    if not os.environ.get("HF_TOKEN"):
         raise ValueError("HF_TOKEN is not set. Add it to your .env file.")
     # huggingface_hub reads HF_TOKEN from os.environ automatically.
 
@@ -72,7 +72,7 @@ def load_model():
 
 
 def run_inference_stream(
-    model, processor, messages: list[dict], images: list
+    model, processor, messages: list[dict], images: list[PIL.Image.Image]
 ) -> Iterator[str]:
     """Yield response text chunks from MedGemma via mlx-vlm streaming."""
     from mlx_vlm import stream_generate
