@@ -241,7 +241,6 @@ class TestBuildMessages:
         image_items = [c for c in content if c["type"] == "image"]
         assert len(image_items) == 1
         assert image_items[0] == {"type": "image"}
-        assert "image" not in image_items[0] or image_items[0]["type"] == "image"
 
     def test_empty_slices(self):
         msgs, images = build_messages([], "inst", "q")
