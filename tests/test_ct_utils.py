@@ -223,6 +223,8 @@ class TestBuildMessages:
         assert content[3] == {"type": "text", "text": "query"}
         assert len(images) == 1
         assert isinstance(images[0], PIL.Image.Image)
+        assert images[0].mode == "RGB"
+        assert images[0].size == (4, 4)
 
     def test_structure_multiple_slices(self, small_rgb):
         slices = [small_rgb, small_rgb, small_rgb]
@@ -236,11 +238,12 @@ class TestBuildMessages:
         assert all(isinstance(img, PIL.Image.Image) for img in images)
 
     def test_image_entries_are_placeholders(self, small_rgb):
-        msgs, images = build_messages([small_rgb], "inst", "q")
+        slices = [small_rgb, small_rgb, small_rgb]
+        msgs, images = build_messages(slices, "inst", "q")
         content = msgs[0]["content"]
         image_items = [c for c in content if c["type"] == "image"]
-        assert len(image_items) == 1
-        assert image_items[0] == {"type": "image"}
+        assert len(image_items) == 3
+        assert all(item == {"type": "image"} for item in image_items)
 
     def test_empty_slices(self):
         msgs, images = build_messages([], "inst", "q")
